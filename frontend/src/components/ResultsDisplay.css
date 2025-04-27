@@ -1,0 +1,66 @@
+.results-container {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--card-background);
+  width: 100%;
+  max-width: 800px; /* Adjust as needed */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.results-container h2 {
+  text-align: center;
+  margin-top: 0;
+  margin-bottom: 10px; /* Adjust spacing */
+  color: var(--primary-color);
+}
+
+/* NEW: Winner Announcement Style */
+.winner-announcement {
+    text-align: center;
+    font-size: 1.3rem;
+    font-weight: bold;
+    color: var(--primary-color); /* Or a distinct color like green */
+    margin-bottom: 20px;
+    padding: 10px;
+    background-color: #e7f3ff; /* Light blue background */
+    border-radius: 6px;
+}
+
+.drawings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); /* Responsive grid */
+  gap: 20px;
+}
+
+.drawing-result {
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+  background-color: #f9f9f9;
+}
+
+.drawing-result img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 10px;
+  border: 1px solid #ddd;
+  background-color: white; /* Ensure canvas bg shows */
+}
+
+.drawing-result .player-nickname {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-muted-color);
+  margin: 0;
+}
+
+/* Style for the winner (Phase 4) */
+.drawing-result.winner {
+    border: 2px solid gold;
+    box-shadow: 0 0 10px gold;
+    background-color: #fffacd; /* Lemon Chiffon */
+} 

@@ -1,0 +1,45 @@
+.player-list-container {
+  border: 1px solid var(--border-color);
+  padding: 1rem; /* Use rem */
+  min-width: 180px; /* Slightly wider */
+  background-color: var(--card-background);
+  border-radius: 8px; /* Match other elements */
+  align-self: stretch; /* Allow it to grow vertically if needed */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.player-list-container h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.75rem;
+  color: var(--text-muted-color);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.player-list-container ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 300px; /* Add max height for scroll */
+  overflow-y: auto; /* Enable scroll if list is long */
+}
+
+.player-list-container li {
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid #f0f0f0; /* Lighter separator */
+  font-size: 0.95rem;
+}
+
+.player-list-container li:last-child {
+    border-bottom: none;
+}
+
+.player-list-container p {
+    text-align: center;
+    color: var(--text-muted-color);
+    font-style: italic;
+    padding: 1rem 0;
+} 

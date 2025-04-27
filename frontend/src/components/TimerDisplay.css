@@ -1,0 +1,33 @@
+.timer-display {
+  font-size: 1.4rem;
+  font-weight: 600;
+  background-color: #e0e0e0;
+  padding: 8px 15px;
+  border-radius: 20px;
+  color: #333;
+  min-width: 120px; /* Ensure minimum width */
+  text-align: center;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.timer-display .time-value {
+  font-weight: 700;
+  margin-left: 5px;
+}
+
+.timer-display.low-time {
+    background-color: #ffdddd;
+    color: #d73a49; /* Use error color from variables */
+    animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+    from {
+        transform: scale(1);
+        box-shadow: 0 0 3px rgba(215, 58, 73, 0.3);
+    }
+    to {
+        transform: scale(1.03);
+        box-shadow: 0 0 6px rgba(215, 58, 73, 0.5);
+    }
+} 

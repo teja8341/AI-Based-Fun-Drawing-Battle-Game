@@ -1,0 +1,44 @@
+.game-controls {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 50px; /* Ensure space even when empty */
+}
+
+.control-button {
+  padding: 12px 25px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  transition: background-color 0.2s ease-in-out, transform 0.1s ease;
+}
+
+.control-button:hover {
+    transform: translateY(-1px);
+}
+
+.start-button {
+  background-color: #28a745; /* Green */
+}
+
+.start-button:hover {
+  background-color: #218838;
+}
+
+.new-round-button {
+    background-color: var(--primary-color); /* Blue */
+}
+
+.new-round-button:hover {
+    background-color: var(--primary-hover-color);
+}
+
+.waiting-message {
+    color: var(--text-muted-color);
+    font-style: italic;
+    font-size: 1rem;
+} 
