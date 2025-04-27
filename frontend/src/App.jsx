@@ -6,6 +6,7 @@ import TimerDisplay from './components/TimerDisplay';
 import PromptDisplay from './components/PromptDisplay';
 import GameControls from './components/GameControls';
 import ResultsDisplay from './components/ResultsDisplay';
+import LoadingIndicator from './components/LoadingIndicator';
 import './App.css';
 
 const SOCKET_SERVER_URL = "http://localhost:3001"; // Backend server address
@@ -18,11 +19,12 @@ function App() {
   const [players, setPlayers] = useState([]);
   const [error, setError] = useState(''); // To display errors from the server
   const [hostId, setHostId] = useState(null); // Track the host
-  const [gamePhase, setGamePhase] = useState('lobby'); // 'lobby', 'waiting', 'drawing', 'revealing'
+  const [gamePhase, setGamePhase] = useState('lobby'); // 'lobby', 'waiting', 'drawing', 'judging', 'revealing'
   const [currentPrompt, setCurrentPrompt] = useState(null);
   const [timerEndTime, setTimerEndTime] = useState(null);
   const [submittedDrawings, setSubmittedDrawings] = useState({}); // { playerId: drawingDataUrl }
   const [winnerId, setWinnerId] = useState(null); // NEW: Track the winner
+  const [showRoomIdInput, setShowRoomIdInput] = useState(false); // NEW: State for lobby UI
 
   const drawingCanvasRef = useRef(); // Ref for canvas methods
 
@@ -169,16 +171,24 @@ function App() {
   };
 
   const handleJoinGame = () => {
+    if (!showRoomIdInput) {
+        // First click: Show the input
+        setShowRoomIdInput(true);
+        setError(''); // Clear any previous errors
+        return; 
+    }
+
+    // Second click (input is visible): Attempt to join
     if (socket && nickname.trim() && roomIdToJoin.trim()) {
-      console.log(`Attempting to join room ${roomIdToJoin} with nickname: ${nickname}`);
-      socket.emit('joinGame', { roomId: roomIdToJoin.trim().toUpperCase(), nickname: nickname.trim() });
-      setError(''); // Clear error on new action
+        console.log(`Attempting to join room ${roomIdToJoin} with nickname: ${nickname}`);
+        socket.emit('joinGame', { roomId: roomIdToJoin.trim().toUpperCase(), nickname: nickname.trim() });
+        setError('');
     } else if (!nickname.trim()) {
-      setError('Please enter a nickname.');
+        setError('Please enter a nickname.');
     } else if (!roomIdToJoin.trim()) {
-      setError('Please enter a Room ID.');
+        setError('Please enter a Room ID.');
     } else {
-      setError('Not connected to server yet.');
+        setError('Not connected to server yet.');
     }
   };
 
@@ -229,7 +239,15 @@ function App() {
 
   return (
     <div className="App">
-      <h1>Drawing Battle!</h1>
+      {/* Header Area */} 
+      <div className="app-header">
+        <h1>Drawing Battle!</h1>
+        {/* Display nickname if available */} 
+        {nickname && !showLobby && (
+          <span className="current-user-display">Playing as: {nickname}</span>
+        )}
+      </div>
+      
       {error && <p className="error-message">Error: {error}</p>}
 
       {showLobby ? (
@@ -247,33 +265,50 @@ function App() {
             Host New Game
           </button>
           <hr />
-          <input
-            type="text"
-            placeholder="Enter Room ID to Join"
-            value={roomIdToJoin}
-            onChange={(e) => setRoomIdToJoin(e.target.value)}
-            onInput={(e) => e.target.value = e.target.value.toUpperCase()} // Force uppercase
-          />
-          <button onClick={handleJoinGame} disabled={!socket || !nickname.trim() || !roomIdToJoin.trim()}>
-            Join Game
+          {showRoomIdInput && (
+            <input
+              type="text"
+              placeholder="Enter Room ID to Join"
+              value={roomIdToJoin}
+              onChange={(e) => setRoomIdToJoin(e.target.value)}
+              onInput={(e) => e.target.value = e.target.value.toUpperCase()} // Force uppercase
+              className="room-id-input" // Add class for potential styling
+            />
+          )}
+          <button onClick={handleJoinGame} disabled={!socket || !nickname.trim() || (showRoomIdInput && !roomIdToJoin.trim())}>
+            {showRoomIdInput ? 'Confirm Join' : 'Join Game'}
           </button>
         </div>
       ) : (
-        // Show Game UI if in a room
         <div className="game-room">
-          <h2>Room: {currentRoomId}</h2>
+          {/* == NEW Horizontal Top Bar == */}
+          <div className="game-top-bar">
+            {/* Room ID */} 
+            <h2>Room: {currentRoomId}</h2>
+            
+            {/* Prompt (only during drawing/revealing/judging) */} 
+            {(gamePhase === 'drawing' || gamePhase === 'revealing' || gamePhase === 'judging') && (
+               <PromptDisplay prompt={currentPrompt} /> 
+            )}
 
-          {/* == Top Bar: Prompt & Timer == */}
-          {(gamePhase === 'drawing' || gamePhase === 'revealing') && (
-            <div className="game-info-bar">
-              <PromptDisplay prompt={currentPrompt} />
-              <TimerDisplay endTime={timerEndTime} />
-            </div>
-          )}
+            {/* Timer (only during drawing/revealing/judging) */} 
+            {(gamePhase === 'drawing' || gamePhase === 'revealing' || gamePhase === 'judging') && (
+                <TimerDisplay endTime={timerEndTime} />
+            )}
 
+            {/* Controls (only during waiting/revealing) */} 
+            {(gamePhase === 'waiting' || gamePhase === 'revealing') && (
+                <GameControls
+                    gamePhase={gamePhase}
+                    isHost={isHost}
+                    onStartGame={handleStartGame}
+                    onStartNewRound={handleStartNewRound}
+                />
+            )}
+          </div>
+          
           {/* == Main Content Area == */}
           <div className="main-content">
-            {/* Render Canvas/Players only when waiting or drawing */}
             {(gamePhase === 'waiting' || gamePhase === 'drawing') && (
               <div className="game-layout">
                 <DrawingCanvas
@@ -284,7 +319,10 @@ function App() {
               </div>
             )}
 
-            {/* Render Results only when phase is revealing AND drawings exist */}
+            {gamePhase === 'judging' && (
+              <LoadingIndicator message="AI is judging the drawings..." />
+            )}
+
             {resultsReady && (
               <ResultsDisplay
                 drawings={submittedDrawings}
@@ -293,14 +331,6 @@ function App() {
               />
             )}
           </div>
-
-          {/* == Bottom Controls == */}
-          <GameControls
-            gamePhase={gamePhase}
-            isHost={isHost}
-            onStartGame={handleStartGame}
-            onStartNewRound={handleStartNewRound}
-          />
         </div>
       )}
     </div>

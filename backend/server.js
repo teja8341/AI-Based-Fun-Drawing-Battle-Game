@@ -71,28 +71,33 @@ const io = new Server(httpServer, {
 // rooms[roomId] = {
 //   players: [{ id: socketId, nickname: string }, ... ],
 //   hostId: socketId,
-//   gamePhase: 'waiting' | 'drawing' | 'collecting' | 'revealing', // Added 'collecting' phase
+//   gamePhase: 'waiting' | 'drawing' | 'collecting' | 'judging' | 'revealing', // Added 'judging' phase
 //   currentPrompt: string | null,
 //   timerEndTime: number | null, // Timestamp when the timer ends
 //   roundDrawings: { [socketId]: string }, // Store drawings (e.g., base64 data URL) for the round
 //   timerId: NodeJS.Timeout | null, // Store the timer ID for cancellation
-//   graceTimerId: NodeJS.Timeout | null // Store the grace period timer ID
+//   graceTimerId: NodeJS.Timeout | null, // Store the grace period timer ID
+//   winnerId: string | null, // Store the winner ID
 // }
 const rooms = {};
 
-// Helper function to get players in a room (updated to include hostId)
+// Helper function to get room state for client
 const getRoomStateForClient = (roomId) => {
     const room = rooms[roomId];
     if (!room) return null;
-    // Map 'collecting' phase to 'drawing' for the client (they still see timer ending)
-    const clientPhase = room.gamePhase === 'collecting' ? 'drawing' : room.gamePhase;
+    // Map 'collecting' phase to 'drawing' for the client
+    // Map 'judging' phase explicitly for the client
+    let clientPhase = room.gamePhase;
+    if (clientPhase === 'collecting') {
+        clientPhase = 'drawing';
+    }
     return {
         players: room.players || [],
         hostId: room.hostId,
-        gamePhase: clientPhase,
+        gamePhase: clientPhase, // Send 'judging' phase to client
         currentPrompt: room.currentPrompt,
-        timerEndTime: room.timerEndTime
-        // We don't send roundDrawings or timerId to the client in this general update
+        timerEndTime: room.timerEndTime,
+        winnerId: room.winnerId // Also include winnerId if available (for results phase)
     };
 }
 
@@ -197,6 +202,7 @@ io.on('connection', (socket) => {
       roundDrawings: {},
       timerId: null,
       graceTimerId: null, // Initialize grace timer ID
+      winnerId: null, // Initialize winner ID
     };
 
     socket.join(newRoomId); // Make the socket join the Socket.IO room
@@ -280,33 +286,48 @@ io.on('connection', (socket) => {
           rooms[roomId].timerId = null;
 
           // Start the grace period timer
-          rooms[roomId].graceTimerId = setTimeout(async () => { // Make callback async
-              const currentRoom = rooms[roomId]; // Reference room state at this moment
+          rooms[roomId].graceTimerId = setTimeout(async () => {
+              const currentRoom = rooms[roomId];
               if (currentRoom && currentRoom.gamePhase === 'collecting') {
-                  console.log(`[${roomId}] Grace period ended. Judging drawings...`);
+                  console.log(`[${roomId}] Grace period ended. Entering judging phase.`);
                   currentRoom.graceTimerId = null;
+                  currentRoom.gamePhase = 'judging'; // <--- Set phase to JUDGING
+                  currentRoom.winnerId = null; // Ensure winner is null before judging
 
-                  // --- Call AI Judge ---
+                  // --- Notify clients we are judging --- 
+                  io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
+
+                  // --- Call AI Judge (async) ---
                   let winnerId = null;
                   try {
+                      // Add a small delay for UI to update if needed (optional)
+                      // await new Promise(resolve => setTimeout(resolve, 50)); 
                       winnerId = await judgeDrawings(currentRoom.currentPrompt, currentRoom.roundDrawings);
-                      currentRoom.winnerId = winnerId; // Store winner ID in room state
+                      // Only update winnerId if judgeDrawings returns a valid ID
+                      if (winnerId) {
+                         currentRoom.winnerId = winnerId; 
+                      }
                   } catch (judgeError) {
                       console.error(`[${roomId}] Error during AI judging:`, judgeError);
-                      // Proceed without a winner if judging fails
                   }
                   // --- End AI Judge Call ---
 
-                  console.log(`[${roomId}] Revealing results. Winner: ${winnerId || 'None'}`);
-                  currentRoom.gamePhase = 'revealing'; // Now change phase to revealing
+                  // Ensure room still exists and phase is still judging before proceeding
+                  if (rooms[roomId] && rooms[roomId].gamePhase === 'judging') {
+                        console.log(`[${roomId}] Judging complete. Revealing results. Winner: ${currentRoom.winnerId || 'None'}`);
+                        // Now set phase to revealing AFTER judging is done
+                        rooms[roomId].gamePhase = 'revealing'; 
 
-                  // Send results including the winner ID
-                  io.to(roomId).emit('showResults', {
-                      drawings: currentRoom.roundDrawings,
-                      winnerId: winnerId // Include winnerId here
-                  });
-                  // Also update the general state (phase change)
-                  io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
+                        // Send results including the winner ID
+                        io.to(roomId).emit('showResults', {
+                            drawings: currentRoom.roundDrawings,
+                            winnerId: currentRoom.winnerId
+                        });
+                        // Update state again to reflect revealing phase (client might already know winner from showResults)
+                        io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
+                    } else {
+                        console.log(`[${roomId}] Room state changed during judging, skipping reveal.`);
+                    }
               }
           }, GRACE_PERIOD);
       }

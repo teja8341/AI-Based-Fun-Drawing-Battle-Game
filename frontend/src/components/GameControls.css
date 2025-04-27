@@ -1,9 +1,10 @@
 .game-controls {
-  margin-top: 20px;
+  /* margin-top: 20px; */ /* Remove or reduce top margin */
+  /* margin-bottom: 1rem; */ /* Removed */
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 50px; /* Ensure space even when empty */
+  min-height: 40px;
 }
 
 .control-button {
