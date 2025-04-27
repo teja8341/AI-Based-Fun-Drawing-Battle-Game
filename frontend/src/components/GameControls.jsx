@@ -7,13 +7,25 @@ const GameControls = ({
   onStartGame, 
   onStartNewRound, 
   currentDrawTime, // in ms
-  onSetDrawTime 
+  onSetDrawTime,
+  currentTotalRounds, // NEW
+  onSetTotalRounds, // NEW
 }) => {
 
   // Handler for input change - convert ms to seconds for display/input
   const handleTimeChange = (event) => {
     const timeInSeconds = event.target.value;
-    onSetDrawTime(timeInSeconds); // Pass seconds to App.jsx handler
+    // Convert seconds back to milliseconds before sending
+    const timeInMs = parseInt(timeInSeconds, 10) * 1000;
+    if (!isNaN(timeInMs)) {
+      onSetDrawTime(timeInMs); // Pass ms to App.jsx handler
+    }
+  };
+
+  // Handler for rounds change
+  const handleRoundsChange = (event) => {
+    const rounds = event.target.value;
+    onSetTotalRounds(rounds);
   };
 
   const displayTimeSeconds = currentDrawTime ? Math.round(currentDrawTime / 1000) : '30'; // Default/fallback display
@@ -36,6 +48,20 @@ const GameControls = ({
               className="draw-time-input"
             />
           </div>
+          {/* NEW: Total Rounds Setting */}
+          <div className="total-rounds-setting">
+            <label htmlFor="totalRoundsInput">Total Rounds:</label>
+            <input 
+              type="number"
+              id="totalRoundsInput"
+              value={currentTotalRounds}
+              onChange={handleRoundsChange}
+              min="1" // Mirror server validation
+              max="10" // Mirror server validation
+              step="1" 
+              className="total-rounds-input"
+            />
+          </div>
           {/* Start Game Button */}
           <button onClick={onStartGame} className="control-button start-button">
             Start Game
@@ -45,7 +71,7 @@ const GameControls = ({
 
       {!isHost && gamePhase === 'waiting' && (
         <div className="non-host-waiting-info">
-           <p className="waiting-message">Waiting for host ({displayTimeSeconds}s draw time)...</p>
+           <p className="waiting-message">Waiting for host ({displayTimeSeconds}s draw time, {currentTotalRounds} rounds)...</p>
         </div>
       )}
 

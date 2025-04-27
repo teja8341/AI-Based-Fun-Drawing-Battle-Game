@@ -9,7 +9,9 @@ import ResultsDisplay from './components/ResultsDisplay';
 import LoadingIndicator from './components/LoadingIndicator';
 import CanvasToolbar from './components/CanvasToolbar';
 import ReviewDisplay from './components/ReviewDisplay';
+import GameOverDisplay from './components/GameOverDisplay';
 import './App.css';
+import { getNickname } from './utils/playerUtils.js'; // NEW: Import getNickname
 
 // Use environment variable for backend URL, fallback for local dev
 const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_SERVER_URL || "http://localhost:3001";
@@ -29,6 +31,13 @@ function App() {
   const [reviewDrawings, setReviewDrawings] = useState({}); // NEW: For reviewing phase
   const [winnerId, setWinnerId] = useState(null); // NEW: Track the winner
   const [showRoomIdInput, setShowRoomIdInput] = useState(false); // NEW: State for lobby UI
+
+  // NEW: Multi-round/Game State
+  const [currentRound, setCurrentRound] = useState(0);
+  const [totalRounds, setTotalRounds] = useState(1);
+  const [playerScores, setPlayerScores] = useState({}); // Cumulative scores { playerId: score }
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [overallWinnerInfo, setOverallWinnerInfo] = useState({ ids: null, score: -1, isTie: false });
 
   // NEW: State for drawing tools
   const [currentTool, setCurrentTool] = useState('pen'); // 'pen' or 'eraser'
@@ -91,6 +100,8 @@ function App() {
       setGamePhase('lobby');
       setSubmittedDrawings({});
       setWinnerId(null); // Reset winner on disconnect
+      setIsGameOver(false); // Reset game over state
+      setOverallWinnerInfo({ ids: null, score: -1, isTie: false }); // Reset winner info
     });
 
     newSocket.on('connect_error', (err) => {
@@ -123,6 +134,8 @@ function App() {
       setCurrentRoomId(null); // Ensure user is not considered "in" a room on error
       setGamePhase('lobby');
       setWinnerId(null); // Reset winner on join error too
+      setIsGameOver(false); // Reset game over state
+      setOverallWinnerInfo({ ids: null, score: -1, isTie: false }); // Reset winner info
     });
 
     // --- Game State Listeners ---
@@ -137,6 +150,19 @@ function App() {
         setCurrentDrawTime(state.drawTime || null); // Update draw time state
         setRoundScores(state.roundScores || null); // NEW: Update scores state
         setRoundComments(state.roundComments || null); // NEW: Update comments state
+        // NEW: Update multi-round state
+        setCurrentRound(state.currentRound || 0);
+        setTotalRounds(state.totalRounds || 1);
+        setPlayerScores(state.playerScores || {});
+        // If game phase is now 'gameOver', set flag (actual winner comes from gameOver event)
+        if (state.gamePhase === 'gameOver') {
+            setIsGameOver(true);
+        } else {
+             // Reset game over state if not in game over phase
+             setIsGameOver(false);
+             setOverallWinnerInfo({ ids: null, score: -1, isTie: false }); 
+        }
+
         // Clear drawings and winner if returning to waiting phase
         if (state.gamePhase === 'waiting' && gamePhase !== 'waiting') {
           setSubmittedDrawings({});
@@ -182,6 +208,26 @@ function App() {
       setWinnerId(null);
       setRoundScores(null);
       setRoundComments(null); // NEW: Clear comments state
+    });
+
+    // --- NEW: Game Over Listener ---
+    newSocket.on('gameOver', (gameOverData) => {
+        console.log('[Listener gameOver] Received game over data:', gameOverData);
+        setGamePhase('gameOver'); // Ensure phase is set
+        setIsGameOver(true);
+        setOverallWinnerInfo({
+            ids: gameOverData.overallWinnerId, // Could be null or an array
+            score: gameOverData.finalScores && gameOverData.overallWinnerId ? gameOverData.finalScores[gameOverData.overallWinnerId[0]] : -1, // Get score of first winner if exists
+            isTie: gameOverData.isTie,
+        });
+        setPlayerScores(gameOverData.finalScores || {}); // Update with final scores
+        // Clear round-specific things
+        setTimerEndTime(null);
+        setCurrentPrompt(null);
+        setSubmittedDrawings({}); 
+        setWinnerId(null);
+        setRoundScores(null);
+        setRoundComments(null);
     });
 
     // Cleanup on component unmount
@@ -298,10 +344,24 @@ function App() {
     }
   };
 
-  // NEW: Handler for setting draw time (called from GameControls)
-  const handleSetDrawTime = (newTimeSeconds) => {
+  // NEW: Handler for setting total rounds (called from GameControls)
+  const handleSetTotalRounds = (rounds) => {
     if (socket && isHost && gamePhase === 'waiting') {
-      const newTimeMs = parseInt(newTimeSeconds, 10) * 1000;
+        const numRounds = parseInt(rounds, 10);
+        if (!isNaN(numRounds) && numRounds >= 1 && numRounds <= 10) { // Add basic client validation
+            console.log(`Emitting setTotalRounds: ${numRounds}`);
+            socket.emit('setTotalRounds', numRounds);
+            // The state will update via the roomStateUpdate listener
+        } else {
+            console.warn("Attempted to set invalid number of rounds:", rounds);
+        }
+    }
+  };
+
+  // NEW: Handler for setting draw time (called from GameControls)
+  const handleSetDrawTime = (timeInMs) => {
+    if (socket && isHost && gamePhase === 'waiting') {
+      const newTimeMs = parseInt(timeInMs, 10);
       if (!isNaN(newTimeMs)) {
           console.log(`[UI] Host attempting to set draw time to ${newTimeMs}ms`);
           // Add basic client-side validation mirroring server?
@@ -314,8 +374,23 @@ function App() {
             // Maybe show a temporary error message on the UI?
           }
       } else {
-        console.error(`[UI] Invalid time input for handleSetDrawTime: ${newTimeSeconds}`);
+        console.error(`[UI] Invalid time input for handleSetDrawTime: ${timeInMs}`);
       }
+    }
+  };
+
+  // Helper function to get nickname (or array of nicknames for ties)
+  const getWinnerNicknames = (winnerIds) => {
+    if (!winnerIds || winnerIds.length === 0) return "Nobody";
+    return winnerIds.map(id => getNickname(id, players)).join(' & ');
+  };
+
+  // NEW: Handler to reset game from Game Over screen (Host only)
+  const handlePlayAgain = () => {
+    if (socket && isHost && gamePhase === 'gameOver') {
+        console.log('Host requesting to play again (resetGame)...');
+        socket.emit('resetGame');
+        // State will update via roomStateUpdate/clearResults
     }
   };
 
@@ -374,6 +449,11 @@ function App() {
             {/* Room ID */} 
             <h2>Room: {currentRoomId}</h2>
             
+            {/* NEW: Round Status */}
+            {(gamePhase !== 'lobby' && gamePhase !== 'waiting' && currentRound > 0) && (
+                <div className="round-status">Round {currentRound} / {totalRounds}</div>
+            )}
+
             {/* Prompt (only during drawing/revealing/judging) */} 
             {(gamePhase === 'drawing' || gamePhase === 'revealing' || gamePhase === 'judging') && (
                <PromptDisplay prompt={currentPrompt} /> 
@@ -393,6 +473,8 @@ function App() {
                     onStartNewRound={handleStartNewRound}
                     currentDrawTime={currentDrawTime} // Pass draw time state
                     onSetDrawTime={handleSetDrawTime} // Pass draw time handler
+                    currentTotalRounds={totalRounds} // NEW: Pass total rounds state
+                    onSetTotalRounds={handleSetTotalRounds} // NEW: Pass handler
                 />
             )}
           </div>
@@ -440,8 +522,21 @@ function App() {
                 players={players}
                 winnerId={winnerId}
                 scores={roundScores}
-                comments={roundComments} // NEW: Pass comments prop
+                comments={roundComments}
+                playerScores={playerScores}
               />
+            )}
+
+            {/* NEW: Game Over Display */} 
+            {isGameOver && (
+                <GameOverDisplay 
+                    winnerNicknames={getWinnerNicknames(overallWinnerInfo.ids)}
+                    isTie={overallWinnerInfo.isTie}
+                    finalScores={playerScores}
+                    players={players}
+                    isHost={isHost}
+                    onPlayAgain={handlePlayAgain} // Use the new handler
+                />
             )}
           </div>
         </div>

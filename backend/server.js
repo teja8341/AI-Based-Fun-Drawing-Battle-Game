@@ -84,6 +84,9 @@ const io = new Server(httpServer, {
 //   drawTime: number, // NEW: Configurable draw time in milliseconds
 //   roundScores: { [socketId]: number } | null, // Scores for the round
 //   roundComments: { [socketId]: string } | null // NEW: Comments for the round
+//   totalRounds: number, // Total number of rounds for the game
+//   currentRound: number, // Current round number (1-based)
+//   playerScores: { [socketId]: number } // Cumulative scores across rounds
 // }
 const rooms = {};
 
@@ -106,7 +109,11 @@ const getRoomStateForClient = (roomId) => {
         winnerId: room.winnerId,
         drawTime: room.drawTime,
         roundScores: room.roundScores,
-        roundComments: room.roundComments
+        roundComments: room.roundComments,
+        // NEW: Add multi-round state
+        totalRounds: room.totalRounds,
+        currentRound: room.currentRound,
+        playerScores: room.playerScores
     };
 }
 
@@ -294,7 +301,11 @@ io.on('connection', (socket) => {
       winnerId: null, // Initialize winner ID
       drawTime: DRAW_TIME, // NEW: Configurable draw time in milliseconds
       roundScores: null, // NEW: Initialize roundScores
-      roundComments: null // NEW: Initialize roundComments
+      roundComments: null, // NEW: Initialize roundComments
+      // NEW: Multi-round state
+      totalRounds: 3, // Default to 3 rounds for now
+      currentRound: 0,
+      playerScores: { [socket.id]: 0 } // Initialize host score
     };
 
     socket.join(newRoomId); // Make the socket join the Socket.IO room
@@ -332,6 +343,7 @@ io.on('connection', (socket) => {
     console.log(`Player ${nickname} (${socket.id}) is joining room: ${requestedRoomId}`);
 
     room.players.push({ id: socket.id, nickname: nickname.trim() });
+    room.playerScores[socket.id] = 0; // Initialize score for joining player
     socket.join(requestedRoomId); // Join the Socket.IO room
 
     socket.emit('joinedRoom', requestedRoomId); // Confirm join success
@@ -372,6 +384,7 @@ io.on('connection', (socket) => {
     if (room.graceTimerId) clearTimeout(room.graceTimerId);
     room.graceTimerId = null;
     room.winnerId = null;
+    room.currentRound = 1; // Start the first round
 
     // Main drawing timer
     room.timerId = setTimeout(() => {
@@ -433,6 +446,20 @@ io.on('connection', (socket) => {
           room.winnerId = judgeResult.winnerId;
           room.roundScores = judgeResult.scores;
           room.roundComments = judgeResult.comments; // Store the comments object correctly
+
+          // --- NEW: Update cumulative scores --- 
+          if (room.roundScores) {
+              for (const playerId in room.roundScores) {
+                  if (room.playerScores.hasOwnProperty(playerId)) {
+                      room.playerScores[playerId] += room.roundScores[playerId];
+                  } else {
+                      // Should not happen if players are managed correctly, but good to handle
+                      console.warn(`[${roomId}] Player ${playerId} has round score but no cumulative score entry. Initializing.`);
+                      room.playerScores[playerId] = room.roundScores[playerId]; 
+                  }
+              }
+          }
+
       } catch (judgeError) {
           console.error(`[${roomId}] Error during AI judging:`, judgeError);
           // Keep winnerId, roundScores, roundComments as null/default
@@ -453,7 +480,7 @@ io.on('connection', (socket) => {
               scores: room.roundScores,
               comments: room.roundComments // NEW: Send comments correctly
           });
-          // Update state again to reflect revealing phase
+          // Update state again to reflect revealing phase AND updated cumulative scores
           io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
       } else {
           console.log(`[${roomId}] Room state changed during judging, skipping reveal.`);
@@ -498,32 +525,177 @@ io.on('connection', (socket) => {
     // }
   });
 
-  // --- Start New Round --- (Host only)
+  // --- Start New Round / End Game --- (Host only)
   socket.on('startNewRound', () => {
     const roomId = socket.data.currentRoomId;
     const room = rooms[roomId];
-    // Allow starting new round only from revealing phase
+    // Allow transition only from revealing phase by the host
     if (!room || room.hostId !== socket.id || room.gamePhase !== 'revealing') {
-      console.log(`[${roomId}] Unauthorized startNewRound attempt by ${socket.id} in phase ${room?.gamePhase}`);
+      console.log(`[${roomId}] Unauthorized startNewRound/endGame attempt by ${socket.id} in phase ${room?.gamePhase}`);
       return;
     }
-    console.log(`[${roomId}] Resetting for new round.`);
 
+    // --- Check if all rounds are completed ---
+    if (room.currentRound >= room.totalRounds) {
+        console.log(`[${roomId}] Game ended after ${room.currentRound} rounds.`);
+        room.gamePhase = 'gameOver';
+
+        // Determine overall winner(s)
+        let overallWinnerId = null;
+        let maxScore = -1;
+        let isTie = false;
+        let winners = [];
+
+        for (const [playerId, score] of Object.entries(room.playerScores)) {
+            // Ensure the player is still in the room
+            if (room.players.some(p => p.id === playerId)) {
+                if (score > maxScore) {
+                    maxScore = score;
+                    winners = [playerId]; // Start new list of winners
+                    isTie = false;
+                } else if (score === maxScore) {
+                    winners.push(playerId);
+                    isTie = true;
+                }
+            }
+        }
+
+        // Assign winner(s)
+        overallWinnerId = winners.length > 0 ? winners : null; // Can be an array in case of a tie
+
+        console.log(`[${roomId}] Overall winner(s): ${overallWinnerId}, Score: ${maxScore}`);
+
+        // Clear timers if any are somehow running
+        if (room.timerId) clearTimeout(room.timerId);
+        if (room.graceTimerId) clearTimeout(room.graceTimerId);
+        room.timerId = null;
+        room.graceTimerId = null;
+        room.timerEndTime = null;
+
+        // Notify clients about game over
+        io.to(roomId).emit('gameOver', { 
+            overallWinnerId: overallWinnerId, 
+            finalScores: room.playerScores,
+            isTie: isTie
+        });
+        // Also send final state update
+        io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
+
+    } else {
+        // --- Start the next round ---
+        console.log(`[${roomId}] Starting round ${room.currentRound + 1} of ${room.totalRounds}.`);
+        room.currentRound++;
+
+        // Select a new random prompt
+        const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+        const roomDrawTime = room.drawTime || DRAW_TIME; // Use room's time, fallback to default
+        console.log(`[${roomId}] New prompt: "${randomPrompt}"`);
+
+        room.gamePhase = 'drawing';
+        room.currentPrompt = randomPrompt;
+        room.timerEndTime = Date.now() + roomDrawTime; 
+        room.roundDrawings = {};
+        room.roundScores = null;
+        room.roundComments = null;
+        if (room.timerId) clearTimeout(room.timerId); // Clear old timers just in case
+        if (room.graceTimerId) clearTimeout(room.graceTimerId);
+        room.graceTimerId = null;
+        room.winnerId = null;
+
+        // Main drawing timer for the new round
+        room.timerId = setTimeout(() => {
+            if (rooms[roomId] && rooms[roomId].gamePhase === 'drawing') {
+                console.log(`[${roomId}] Main timer ended (Round ${room.currentRound}). Entering grace period.`);
+                rooms[roomId].gamePhase = 'collecting';
+                rooms[roomId].timerId = null;
+
+                // Start the grace period timer
+                rooms[roomId].graceTimerId = setTimeout(() => {
+                    const currentRoom = rooms[roomId];
+                    if (currentRoom && currentRoom.gamePhase === 'collecting') {
+                        console.log(`[${roomId}] Grace period ended (Round ${room.currentRound}). Entering reviewing phase.`);
+                        currentRoom.graceTimerId = null;
+                        currentRoom.gamePhase = 'reviewing';
+
+                        io.to(roomId).emit('showAllDrawings', {
+                            drawings: currentRoom.roundDrawings,
+                            prompt: currentRoom.currentPrompt
+                        });
+                        io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
+                    }
+                }, GRACE_PERIOD);
+            }
+        }, roomDrawTime);
+
+        // Notify game state updated for the new round
+        io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
+        io.to(roomId).emit('clearResults'); // Clear previous round results display on client
+    }
+  });
+
+  // --- NEW: Reset Game (Host only, from Game Over) ---
+  socket.on('resetGame', () => {
+    const roomId = socket.data.currentRoomId;
+    const room = rooms[roomId];
+
+    // Only allow reset if host is triggering it from gameOver phase
+    if (!room || room.hostId !== socket.id || room.gamePhase !== 'gameOver') {
+        console.log(`[${roomId}] Unauthorized resetGame attempt by ${socket.id} in phase ${room?.gamePhase}`);
+        return;
+    }
+
+    console.log(`[${roomId}] Host ${socket.id} is resetting the game.`);
+
+    // Reset state back to waiting lobby defaults
     room.gamePhase = 'waiting';
     room.currentPrompt = null;
     room.timerEndTime = null;
     room.roundDrawings = {};
-    room.winnerId = null; // Clear winner ID
+    room.winnerId = null; 
     room.roundScores = null;
-    room.roundComments = null; // NEW: Clear comments
+    room.roundComments = null;
+    room.currentRound = 0;
+    // Reset player scores
+    for (const playerId in room.playerScores) {
+        room.playerScores[playerId] = 0;
+    }
+    // Keep totalRounds and drawTime as potentially configured by host
+    // Clear any lingering timers (shouldn't be any, but good practice)
     if (room.timerId) clearTimeout(room.timerId);
     if (room.graceTimerId) clearTimeout(room.graceTimerId);
     room.timerId = null;
     room.graceTimerId = null;
 
+    // Notify clients of the reset state
     io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
-    io.to(roomId).emit('clearResults');
+    io.to(roomId).emit('clearResults'); // Ensure old results/game over screen is cleared
   });
+
+  // --- NEW: Set Total Rounds --- (Host only, during waiting phase)
+  socket.on('setTotalRounds', (numRounds) => {
+    const roomId = socket.data.currentRoomId;
+    const room = rooms[roomId];
+    const MIN_ROUNDS = 1;
+    const MAX_ROUNDS = 10;
+
+    if (!room || room.hostId !== socket.id || room.gamePhase !== 'waiting') {
+        console.log(`[${roomId}] Unauthorized setTotalRounds attempt by ${socket.id} in phase ${room?.gamePhase}`);
+        return;
+    }
+
+    const rounds = parseInt(numRounds, 10);
+    if (isNaN(rounds) || rounds < MIN_ROUNDS || rounds > MAX_ROUNDS) {
+        console.log(`[${roomId}] Invalid total rounds value received: ${numRounds}. Must be between ${MIN_ROUNDS} and ${MAX_ROUNDS}.`);
+        // Optionally emit an error back to the host?
+        return;
+    }
+
+    console.log(`[${roomId}] Host ${socket.id} set total rounds to ${rounds}`);
+    room.totalRounds = rounds;
+
+    // Notify everyone in the room of the updated state (including the new round count)
+    io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
+});
 
   // --- NEW: Set Draw Time --- (Host only, during waiting phase)
   socket.on('setDrawTime', (newTimeMs) => {
