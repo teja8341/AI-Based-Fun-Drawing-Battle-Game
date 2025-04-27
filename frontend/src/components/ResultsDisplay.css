@@ -56,6 +56,15 @@
   font-size: 0.9rem;
   color: var(--text-muted-color);
   margin: 0;
+  margin-bottom: 5px; /* Add slight margin below nickname */
+}
+
+/* NEW: Style for player score */
+.drawing-result .player-score {
+  font-weight: bold;
+  font-size: 1rem;
+  color: var(--primary-color); /* Or another distinct color */
+  margin: 0; /* Reset margin */
 }
 
 /* Style for the winner (Phase 4) */

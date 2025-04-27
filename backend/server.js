@@ -79,6 +79,7 @@ const io = new Server(httpServer, {
 //   graceTimerId: NodeJS.Timeout | null, // Store the grace period timer ID
 //   winnerId: string | null, // Store the winner ID
 //   drawTime: number, // NEW: Configurable draw time in milliseconds
+//   roundScores: { [socketId]: number } | null // NEW: Scores for the round
 // }
 const rooms = {};
 
@@ -99,7 +100,8 @@ const getRoomStateForClient = (roomId) => {
         currentPrompt: room.currentPrompt,
         timerEndTime: room.timerEndTime,
         winnerId: room.winnerId, // Also include winnerId if available (for results phase)
-        drawTime: room.drawTime // NEW: Send current draw time setting
+        drawTime: room.drawTime, // NEW: Send current draw time setting
+        roundScores: room.roundScores // NEW: Send round scores
     };
 }
 
@@ -114,24 +116,24 @@ function dataUrlToGenerativePart(dataUrl, mimeType = "image/png") {
 }
 
 // --- AI Judging Function ---
+// Returns { winnerId: string|null, scores: { [playerId]: number } | null }
 async function judgeDrawings(prompt, drawings) {
     if (!apiKey) {
         console.log("Skipping AI judging as API key is missing.");
-        return null; // Return null if no API key
+        return { winnerId: null, scores: null }; // Return object
     }
     if (!drawings || Object.keys(drawings).length === 0) {
         console.log("Skipping AI judging as there are no drawings.");
-        return null;
+        return { winnerId: null, scores: null }; // Return object
     }
 
     const playerIds = Object.keys(drawings);
+    const initialScores = playerIds.reduce((acc, id) => { acc[id] = 0; return acc; }, {}); // For fallback
 
-    // Prepare parts for Gemini API
+    // --- NEW PROMPT for JSON Score Distribution ---
     const parts = [
         { text: `Game Prompt: "${prompt}". The following images are drawings submitted by different players. Each player has a unique ID associated with their drawing.` },
     ];
-
-    // Add drawings with their IDs
     playerIds.forEach((playerId) => {
         parts.push({ text: `
 Player ID: ${playerId}` });
@@ -140,14 +142,13 @@ Player ID: ${playerId}` });
             parts.push(imageDataPart);
         } catch (error) {
             console.error(`[AI Judge] Error processing drawing for player ${playerId}:`, error);
-            // Skip this drawing if conversion fails
+            // Skip this drawing if conversion fails? Or assign 0 score?
         }
     });
-
     parts.push({ text: `
-Based *only* on how well the drawings represent the prompt "${prompt}", which drawing is the best? Respond with *only* the Player ID of the winner. If it's impossible to determine a single best drawing or multiple are equally good, respond with "NONE".` });
+Based *only* on how well the drawings represent the prompt "${prompt}", distribute a total of 100 points among the players. Respond with *only* a valid JSON object where keys are the Player IDs and values are the integer points assigned to each player. The sum of all points MUST equal 100. Example format: {"${playerIds[0]}": score1, "${playerIds[1]}": score2, ...}` });
 
-    console.log(`[AI Judge] Sending ${playerIds.length} drawings to Gemini for prompt: "${prompt}"`);
+    console.log(`[AI Judge] Sending ${playerIds.length} drawings to Gemini for prompt: "${prompt}" (Expecting JSON scores)`);
 
     try {
         const result = await model.generateContent({
@@ -157,22 +158,93 @@ Based *only* on how well the drawings represent the prompt "${prompt}", which dr
         });
 
         const responseText = result.response.text().trim();
-        console.log(`[AI Judge] Gemini Response: "${responseText}"`);
+        console.log(`[AI Judge] Gemini Response Text: "${responseText}"`);
 
-        // Check if the response exactly matches one of the player IDs
-        if (playerIds.includes(responseText)) {
-            console.log(`[AI Judge] Winner determined: ${responseText}`);
-            return responseText; // Return the winning player ID
-        } else if (responseText.toUpperCase() === "NONE") {
-             console.log("[AI Judge] Gemini indicated no clear winner.");
-             return null; // No clear winner
-        } else {
-            console.warn(`[AI Judge] Gemini response ("${responseText}") did not match any Player ID or "NONE". No winner selected.`);
-            return null; // Unexpected response
+        // --- Parse and Validate JSON Response ---
+        let parsedScores = null;
+        try {
+            // Attempt to clean potential markdown/formatting issues
+            const cleanedJsonString = responseText.replace(/^```json\n?|```$/g, '').trim();
+            parsedScores = JSON.parse(cleanedJsonString);
+            console.log("[AI Judge] Parsed scores:", parsedScores);
+
+            // Validation
+            let currentTotal = 0;
+            let valid = true;
+            const validatedScores = {};
+
+            for (const playerId of playerIds) {
+                if (!(playerId in parsedScores)) {
+                    console.warn(`[AI Judge] Validation failed: Player ID ${playerId} missing in response.`);
+                    valid = false;
+                    break;
+                }
+                const score = parsedScores[playerId];
+                if (typeof score !== 'number' || !Number.isInteger(score) || score < 0) {
+                    console.warn(`[AI Judge] Validation failed: Invalid score (${score}) for player ${playerId}.`);
+                    valid = false;
+                    break;
+                }
+                validatedScores[playerId] = score;
+                currentTotal += score;
+            }
+
+            // Check for extra keys in response
+            if (valid && Object.keys(parsedScores).length !== playerIds.length) {
+                console.warn(`[AI Judge] Validation failed: Response contains extra/unknown keys.`);
+                valid = false;
+            }
+
+            if (!valid) {
+                 console.warn("[AI Judge] Score validation failed. Assigning default scores (0). Returning no winner.");
+                 return { winnerId: null, scores: initialScores };
+            }
+
+            console.log(`[AI Judge] Initial scores validated. Sum: ${currentTotal}`);
+
+            // --- Normalize Scores to 100 --- (Optional but recommended)
+            let finalScores = {};
+            if (currentTotal === 0) { // Handle case where AI gives all zeros
+                console.warn("[AI Judge] Total score is 0. Assigning 0 to all.");
+                finalScores = initialScores;
+            } else if (currentTotal !== 100) {
+                console.log(`[AI Judge] Normalizing scores from ${currentTotal} to 100.`);
+                playerIds.forEach(id => {
+                    finalScores[id] = Math.round((validatedScores[id] / currentTotal) * 100);
+                });
+                // Due to rounding, the sum might be slightly off 100. Adjust the highest score to compensate.
+                let normalizedSum = Object.values(finalScores).reduce((a, b) => a + b, 0);
+                if (normalizedSum !== 100) {
+                    let diff = 100 - normalizedSum;
+                    let maxScorePlayer = playerIds.reduce((a, b) => finalScores[a] > finalScores[b] ? a : b);
+                    finalScores[maxScorePlayer] += diff;
+                }
+                 console.log("[AI Judge] Normalized scores:", finalScores);
+            } else {
+                finalScores = validatedScores; // Already sums to 100
+            }
+
+            // --- Determine Winner --- 
+            let winnerId = null;
+            let maxScore = -1;
+            for (const [playerId, score] of Object.entries(finalScores)) {
+                if (score > maxScore) {
+                    maxScore = score;
+                    winnerId = playerId;
+                }
+            }
+            console.log(`[AI Judge] Winner determined by max score (${maxScore}): ${winnerId}`);
+            return { winnerId: winnerId, scores: finalScores };
+
+        } catch (parseError) {
+            console.error("[AI Judge] Failed to parse JSON response:", parseError);
+            console.warn("[AI Judge] Assigning default scores (0) due to parse error. Returning no winner.");
+             return { winnerId: null, scores: initialScores }; // Return default on parse error
         }
+
     } catch (error) {
         console.error("[AI Judge] Error calling Gemini API:", error);
-        return null; // Return null on error
+        return { winnerId: null, scores: initialScores }; // Return default on API error
     }
 }
 
@@ -206,6 +278,7 @@ io.on('connection', (socket) => {
       graceTimerId: null, // Initialize grace timer ID
       winnerId: null, // Initialize winner ID
       drawTime: DRAW_TIME, // NEW: Configurable draw time in milliseconds
+      roundScores: null, // NEW: Initialize roundScores
     };
 
     socket.join(newRoomId); // Make the socket join the Socket.IO room
@@ -277,6 +350,7 @@ io.on('connection', (socket) => {
     room.currentPrompt = randomPrompt;
     room.timerEndTime = Date.now() + roomDrawTime; // Use configured draw time
     room.roundDrawings = {};
+    room.roundScores = null; // NEW: Clear scores for new round
     if (room.timerId) clearTimeout(room.timerId);
     if (room.graceTimerId) clearTimeout(room.graceTimerId);
     room.graceTimerId = null;
@@ -314,7 +388,7 @@ io.on('connection', (socket) => {
   });
 
   // --- NEW: Request AI Judgment --- (Triggered by client)
-  socket.on('requestJudgment', async () => { // Make this async
+  socket.on('requestJudgment', async () => {
       const roomId = socket.data.currentRoomId;
       const room = rooms[roomId];
 
@@ -329,35 +403,35 @@ io.on('connection', (socket) => {
       console.log(`[${roomId}] Judgment requested by ${socket.id}. Entering judging phase.`);
       room.gamePhase = 'judging';
       room.winnerId = null; // Ensure winner is null before judging
+      room.roundScores = null; // Clear previous scores
 
       // --- Notify clients we are judging ---
       io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
 
       // --- Call AI Judge (async) ---
-      let winnerId = null;
+      let judgeResult = { winnerId: null, scores: null }; // Default result
       try {
-          // Optional delay might still be useful here if needed
-          // await new Promise(resolve => setTimeout(resolve, 50));
-          winnerId = await judgeDrawings(room.currentPrompt, room.roundDrawings);
-          if (winnerId) {
-              room.winnerId = winnerId;
-          }
+          judgeResult = await judgeDrawings(room.currentPrompt, room.roundDrawings);
+          room.winnerId = judgeResult.winnerId; // Store winner ID
+          room.roundScores = judgeResult.scores; // Store the scores object
       } catch (judgeError) {
           console.error(`[${roomId}] Error during AI judging:`, judgeError);
+          // Keep winnerId and roundScores as null/default
       }
       // --- End AI Judge Call ---
 
       // Ensure room still exists and phase is still judging before proceeding
       if (rooms[roomId] && rooms[roomId].gamePhase === 'judging') {
-          console.log(`[${roomId}] Judging complete. Revealing results. Winner: ${room.winnerId || 'None'}`);
+          console.log(`[${roomId}] Judging complete. Revealing results. Winner: ${room.winnerId || 'None'}. Scores:`, room.roundScores);
           // Now set phase to revealing AFTER judging is done
           rooms[roomId].gamePhase = 'revealing';
 
-          // Send results including the winner ID
+          // Send results including the winner ID AND scores
           io.to(roomId).emit('showResults', {
               drawings: room.roundDrawings,
               winnerId: room.winnerId,
-              prompt: room.currentPrompt // Send prompt here too for context
+              prompt: room.currentPrompt,
+              scores: room.roundScores // NEW: Send scores in payload
           });
           // Update state again to reflect revealing phase
           io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
@@ -420,6 +494,7 @@ io.on('connection', (socket) => {
     room.timerEndTime = null;
     room.roundDrawings = {};
     room.winnerId = null; // Clear winner ID
+    room.roundScores = null; // NEW: Clear scores
     if (room.timerId) clearTimeout(room.timerId);
     if (room.graceTimerId) clearTimeout(room.graceTimerId);
     room.timerId = null;

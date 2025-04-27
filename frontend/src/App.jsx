@@ -36,6 +36,9 @@ function App() {
   // NEW: State for configurable draw time
   const [currentDrawTime, setCurrentDrawTime] = useState(null); // In milliseconds
 
+  // NEW: State for round scores
+  const [roundScores, setRoundScores] = useState(null); // { [playerId]: score }
+
   const drawingCanvasRef = useRef(); // Ref for canvas methods
 
   // --- Event Handlers ---
@@ -127,11 +130,13 @@ function App() {
         setGamePhase(state.gamePhase || 'waiting'); // Default to waiting if phase is missing
         setCurrentPrompt(state.currentPrompt || null);
         setTimerEndTime(state.timerEndTime || null);
-        setCurrentDrawTime(state.drawTime || null); // NEW: Update draw time state
+        setCurrentDrawTime(state.drawTime || null); // Update draw time state
+        setRoundScores(state.roundScores || null); // NEW: Update scores state
         // Clear drawings and winner if returning to waiting phase
         if (state.gamePhase === 'waiting' && gamePhase !== 'waiting') {
           setSubmittedDrawings({});
           setWinnerId(null);
+          setRoundScores(null); // Clear scores too
           drawingCanvasRef.current?.clearCanvas();
         }
       }
@@ -156,11 +161,12 @@ function App() {
         const receivedWinnerId = resultsPayload.winnerId || null;
         console.log(`[Listener showResults] Extracted winnerId: ${receivedWinnerId}`); // Log the extracted ID
         setSubmittedDrawings(resultsPayload.drawings || {});
+        setRoundScores(resultsPayload.scores || null); // NEW: Set scores state
         setWinnerId(receivedWinnerId); // Set the state
-        console.log('[Listener showResults] Called setWinnerId.'); // Confirm state setter was called
+        console.log('[Listener showResults] Called setWinnerId & setRoundScores.');
       }
       setGamePhase('revealing');
-      setCurrentPrompt(null);
+      setCurrentPrompt(null); // Clear prompt after results
       setTimerEndTime(null);
     });
 
@@ -168,6 +174,7 @@ function App() {
       console.log('Clearing results');
       setSubmittedDrawings({});
       setWinnerId(null); // Clear winner ID
+      setRoundScores(null); // NEW: Clear scores state
     });
 
     // Cleanup on component unmount
@@ -425,6 +432,7 @@ function App() {
                 drawings={submittedDrawings}
                 players={players}
                 winnerId={winnerId}
+                scores={roundScores} // NEW: Pass scores prop
               />
             )}
           </div>
