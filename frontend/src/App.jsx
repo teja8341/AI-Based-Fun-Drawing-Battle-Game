@@ -8,6 +8,7 @@ import GameControls from './components/GameControls';
 import ResultsDisplay from './components/ResultsDisplay';
 import LoadingIndicator from './components/LoadingIndicator';
 import CanvasToolbar from './components/CanvasToolbar';
+import ReviewDisplay from './components/ReviewDisplay';
 import './App.css';
 
 const SOCKET_SERVER_URL = "http://localhost:3001"; // Backend server address
@@ -20,10 +21,11 @@ function App() {
   const [players, setPlayers] = useState([]);
   const [error, setError] = useState(''); // To display errors from the server
   const [hostId, setHostId] = useState(null); // Track the host
-  const [gamePhase, setGamePhase] = useState('lobby'); // 'lobby', 'waiting', 'drawing', 'judging', 'revealing'
+  const [gamePhase, setGamePhase] = useState('lobby'); // 'lobby', 'waiting', 'drawing', 'reviewing', 'judging', 'revealing'
   const [currentPrompt, setCurrentPrompt] = useState(null);
   const [timerEndTime, setTimerEndTime] = useState(null);
   const [submittedDrawings, setSubmittedDrawings] = useState({}); // { playerId: drawingDataUrl }
+  const [reviewDrawings, setReviewDrawings] = useState({}); // NEW: For reviewing phase
   const [winnerId, setWinnerId] = useState(null); // NEW: Track the winner
   const [showRoomIdInput, setShowRoomIdInput] = useState(false); // NEW: State for lobby UI
 
@@ -32,6 +34,30 @@ function App() {
   const [currentLineWidth, setCurrentLineWidth] = useState(5); // Default thickness
 
   const drawingCanvasRef = useRef(); // Ref for canvas methods
+
+  // --- Event Handlers ---
+  // Define submitDrawingHandler *before* the useEffect that uses it
+  const submitDrawingHandler = () => {
+    console.log(`[Submit] Attempting submission. Current phase: ${gamePhase}`);
+    // Allow submission during drawing or collecting (grace period)
+    if (gamePhase !== 'drawing' && gamePhase !== 'collecting') {
+        console.warn(`[Submit] Aborted: Not in drawing/collecting phase (Phase: ${gamePhase}).`);
+        return;
+    }
+    if (socket && drawingCanvasRef.current) {
+        const drawingDataUrl = drawingCanvasRef.current.getDrawingDataUrl();
+        if (drawingDataUrl && drawingDataUrl.length > 100) { // Basic check for non-empty canvas data
+            console.log(`[Submit] Got data URL (length: ${drawingDataUrl.length}), emitting submitDrawing...`);
+            socket.emit('submitDrawing', drawingDataUrl);
+        } else {
+            console.warn("[Submit] Failed: Could not get valid drawing data URL.", drawingDataUrl);
+            // Optionally, emit a blank submission or specific event?
+             // socket.emit('submitDrawing', null); // Example: sending null
+        }
+    } else {
+        console.error('[Submit] Failed: Socket or canvas ref not available.');
+    }
+  };
 
   // Effect to establish socket connection
   useEffect(() => {
@@ -107,6 +133,19 @@ function App() {
       }
     });
 
+    // NEW: Listener for the review phase
+    newSocket.on('showAllDrawings', (reviewData) => {
+      console.log('[Listener showAllDrawings] Received review data:', reviewData);
+      if (reviewData && reviewData.drawings) {
+        setReviewDrawings(reviewData.drawings);
+        setCurrentPrompt(reviewData.prompt || 'Prompt not received'); // Keep prompt visible
+        setGamePhase('reviewing');
+        setTimerEndTime(null); // Timer is done
+        setSubmittedDrawings({}); // Clear previous results if any
+        setWinnerId(null);
+      }
+    });
+
     newSocket.on('showResults', (resultsPayload) => {
       console.log('[Listener showResults] Received payload:', resultsPayload); // Log the raw payload
       if (resultsPayload) {
@@ -133,36 +172,42 @@ function App() {
     };
   }, []); // Runs only once on component mount
 
-  // Effect to automatically submit drawing when timer ends
+  // Effect to submit drawing automatically when the client-side timer appears to end
   useEffect(() => {
-    console.log(`[Effect] Checking timer: Phase=${gamePhase}, EndTime=${timerEndTime}`);
+    // Only run this logic if we are in the drawing phase and have a timer end time
     if (gamePhase === 'drawing' && timerEndTime) {
       const now = Date.now();
       const timeLeft = timerEndTime - now;
-      console.log(`[Effect] Time left: ${timeLeft}ms`);
+      console.log(`[Submit Effect] Drawing phase active. Time left: ${timeLeft}ms`);
+
+      // Set a timeout to submit slightly before the timer fully ends on the server
+      const submitBufferMs = 100; // Submit 100ms before the calculated end time
+      const submitTimeout = timeLeft - submitBufferMs;
 
       let timerId = null;
-      if (timeLeft <= 100) { // Add small buffer to try and beat server timer
-        console.log('[Effect] Timer already ended or very close, submitting immediately.');
-        submitDrawingHandler();
-      } else {
-        console.log(`[Effect] Setting timeout for ${timeLeft}ms to submit drawing.`);
+      if (submitTimeout > 0) {
+        console.log(`[Submit Effect] Setting timeout to submit drawing in ${submitTimeout}ms.`);
         timerId = setTimeout(() => {
-            console.log('[Effect] Timeout finished, calling submitDrawingHandler.');
-            submitDrawingHandler();
-        }, timeLeft);
+          console.log('[Submit Effect] Timeout finished, calling submitDrawingHandler.');
+          submitDrawingHandler(); // Submit the drawing
+        }, submitTimeout);
+      } else {
+        console.log('[Submit Effect] Timer already ended or very close, submitting immediately.');
+        submitDrawingHandler();
       }
-      // Cleanup timeout if phase changes before it fires
+
       return () => {
-          if (timerId) {
-              console.log('[Effect] Cleanup: Clearing timer timeout.');
-              clearTimeout(timerId);
-          }
+        if (timerId) {
+          console.log('[Submit Effect] Cleanup: Clearing submit timeout.');
+          clearTimeout(timerId);
+        }
       };
     }
-  }, [gamePhase, timerEndTime]);
+    // Now it's safe to include submitDrawingHandler in the dependency array
+    // because it's defined above. We wrap it in useCallback if it causes re-renders, but start without it.
+  }, [gamePhase, timerEndTime, submitDrawingHandler]);
 
-  // --- Event Handlers ---
+  // --- Other Event Handlers ---
   const handleHostGame = () => {
     if (socket && nickname.trim()) {
       console.log('Attempting to host game with nickname:', nickname);
@@ -204,29 +249,6 @@ function App() {
     }
   };
 
-  const submitDrawingHandler = () => {
-      console.log(`[Submit] Attempting submission. Current phase: ${gamePhase}`);
-      // Check if we are actually in the drawing phase before submitting
-      // Allow submission even if phase *just* switched to revealing server-side, client might be slightly behind.
-      if (gamePhase !== 'drawing' && gamePhase !== 'revealing') {
-          console.warn(`[Submit] Aborted: Not in drawing/revealing phase.`);
-          return;
-      }
-      if (socket && drawingCanvasRef.current) {
-          const drawingDataUrl = drawingCanvasRef.current.getDrawingDataUrl();
-          if (drawingDataUrl && drawingDataUrl.length > 100) { // Basic check for non-empty canvas data
-              console.log(`[Submit] Got data URL (length: ${drawingDataUrl.length}), emitting submitDrawing...`);
-              socket.emit('submitDrawing', drawingDataUrl);
-          } else {
-              console.error("[Submit] Failed: Could not get valid drawing data URL.", drawingDataUrl);
-              // Still emit *something* maybe? Or handle blank submission?
-              // For now, just log the error.
-          }
-      } else {
-          console.error('[Submit] Failed: Socket or canvas ref not available.');
-      }
-  };
-
   const handleStartNewRound = () => {
     if (socket) {
       console.log('Emitting startNewRound');
@@ -249,9 +271,19 @@ function App() {
       setCurrentLineWidth(width);
   };
 
+  // NEW: Handler to request AI judgment (called by host)
+  const handleRequestJudgment = () => {
+    if (socket && gamePhase === 'reviewing') {
+      console.log('Host requesting AI judgment...');
+      socket.emit('requestJudgment');
+      // The server will change the phase to 'judging' and eventually 'revealing'
+    }
+  };
+
   // --- Render Logic ---
   const isHost = socket && socket.id === hostId;
   const showLobby = !currentRoomId || gamePhase === 'lobby';
+  const showReview = gamePhase === 'reviewing' && reviewDrawings && Object.keys(reviewDrawings).length > 0;
   const resultsReady = gamePhase === 'revealing' && submittedDrawings && Object.keys(submittedDrawings).length > 0;
 
   return (
@@ -344,6 +376,17 @@ function App() {
                 />
                 <PlayerList players={players} hostId={hostId} />
               </div>
+            )}
+
+            {/* NEW: Review Phase Display */}
+            {showReview && (
+                <ReviewDisplay
+                  drawings={reviewDrawings}
+                  players={players}
+                  prompt={currentPrompt}
+                  isHost={isHost}                   // Pass isHost prop
+                  onSendForJudgement={handleRequestJudgment} // Pass handler prop
+                />
             )}
 
             {gamePhase === 'judging' && (
