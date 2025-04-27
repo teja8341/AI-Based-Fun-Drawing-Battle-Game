@@ -9,9 +9,9 @@ const getNickname = (playerId, players) => {
     return player ? player.nickname : 'Unknown Player';
 };
 
-// Accept `scores` prop
-const ResultsDisplay = ({ drawings, players, winnerId, scores }) => {
-  console.log('[ResultsDisplay] Rendering with winnerId:', winnerId, 'Scores:', scores);
+// Accept `scores` and `comments` props
+const ResultsDisplay = ({ drawings, players, winnerId, scores, comments }) => {
+  console.log('[ResultsDisplay] Rendering with winnerId:', winnerId, 'Scores:', scores, 'Comments:', comments);
   console.log('[ResultsDisplay] Players prop:', players);
 
   if (!drawings || Object.keys(drawings).length === 0) {
@@ -34,13 +34,14 @@ const ResultsDisplay = ({ drawings, players, winnerId, scores }) => {
           const isWinner = playerId === winnerId;
           console.log(`[ResultsDisplay] Checking player ${playerId}, isWinner: ${isWinner}`);
           const resultClass = isWinner ? "drawing-result winner" : "drawing-result";
-          const playerScore = scores ? scores[playerId] : 'N/A'; // Get score for this player
+          const playerScore = scores ? scores[playerId] : 'N/A';
+          const playerComment = comments ? comments[playerId] : '...'; // Get comment for this player
           return (
               <div key={playerId} className={resultClass}>
                 <img src={drawingDataUrl} alt={`Drawing by ${getNickname(playerId, players)}`} />
                 <p className="player-nickname">{getNickname(playerId, players)}</p>
-                {/* Display Score */}
-                <p className="player-score">Score: {playerScore}</p> 
+                <p className="player-score">Score: {playerScore}</p>
+                <p className="player-comment">"{playerComment}"</p> 
               </div>
           );
         })}

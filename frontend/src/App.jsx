@@ -39,6 +39,9 @@ function App() {
   // NEW: State for round scores
   const [roundScores, setRoundScores] = useState(null); // { [playerId]: score }
 
+  // NEW: State for round comments
+  const [roundComments, setRoundComments] = useState(null); // { [playerId]: string }
+
   const drawingCanvasRef = useRef(); // Ref for canvas methods
 
   // --- Event Handlers ---
@@ -132,11 +135,13 @@ function App() {
         setTimerEndTime(state.timerEndTime || null);
         setCurrentDrawTime(state.drawTime || null); // Update draw time state
         setRoundScores(state.roundScores || null); // NEW: Update scores state
+        setRoundComments(state.roundComments || null); // NEW: Update comments state
         // Clear drawings and winner if returning to waiting phase
         if (state.gamePhase === 'waiting' && gamePhase !== 'waiting') {
           setSubmittedDrawings({});
           setWinnerId(null);
-          setRoundScores(null); // Clear scores too
+          setRoundScores(null);
+          setRoundComments(null); // Clear comments too
           drawingCanvasRef.current?.clearCanvas();
         }
       }
@@ -156,25 +161,26 @@ function App() {
     });
 
     newSocket.on('showResults', (resultsPayload) => {
-      console.log('[Listener showResults] Received payload:', resultsPayload); // Log the raw payload
+      console.log('[Listener showResults] Received payload:', resultsPayload);
       if (resultsPayload) {
         const receivedWinnerId = resultsPayload.winnerId || null;
-        console.log(`[Listener showResults] Extracted winnerId: ${receivedWinnerId}`); // Log the extracted ID
         setSubmittedDrawings(resultsPayload.drawings || {});
-        setRoundScores(resultsPayload.scores || null); // NEW: Set scores state
-        setWinnerId(receivedWinnerId); // Set the state
-        console.log('[Listener showResults] Called setWinnerId & setRoundScores.');
+        setRoundScores(resultsPayload.scores || null);
+        setRoundComments(resultsPayload.comments || null); // NEW: Set comments state
+        setWinnerId(receivedWinnerId);
+        console.log('[Listener showResults] Called setters for winner, scores, comments.');
       }
       setGamePhase('revealing');
-      setCurrentPrompt(null); // Clear prompt after results
+      setCurrentPrompt(null);
       setTimerEndTime(null);
     });
 
     newSocket.on('clearResults', () => {
       console.log('Clearing results');
       setSubmittedDrawings({});
-      setWinnerId(null); // Clear winner ID
-      setRoundScores(null); // NEW: Clear scores state
+      setWinnerId(null);
+      setRoundScores(null);
+      setRoundComments(null); // NEW: Clear comments state
     });
 
     // Cleanup on component unmount
@@ -432,7 +438,8 @@ function App() {
                 drawings={submittedDrawings}
                 players={players}
                 winnerId={winnerId}
-                scores={roundScores} // NEW: Pass scores prop
+                scores={roundScores}
+                comments={roundComments} // NEW: Pass comments prop
               />
             )}
           </div>

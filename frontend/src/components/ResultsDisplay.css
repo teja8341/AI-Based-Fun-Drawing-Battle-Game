@@ -64,7 +64,17 @@
   font-weight: bold;
   font-size: 1rem;
   color: var(--primary-color); /* Or another distinct color */
-  margin: 0; /* Reset margin */
+  margin: 0;
+  margin-bottom: 8px; /* Add margin below score */
+}
+
+/* NEW: Style for player comment */
+.drawing-result .player-comment {
+    font-style: italic;
+    font-size: 0.85rem;
+    color: #555; /* Dark gray */
+    margin: 0;
+    padding: 0 5px; /* Add slight horizontal padding */
 }
 
 /* Style for the winner (Phase 4) */
