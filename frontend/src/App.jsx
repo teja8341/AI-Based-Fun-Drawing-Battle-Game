@@ -7,6 +7,7 @@ import PromptDisplay from './components/PromptDisplay';
 import GameControls from './components/GameControls';
 import ResultsDisplay from './components/ResultsDisplay';
 import LoadingIndicator from './components/LoadingIndicator';
+import CanvasToolbar from './components/CanvasToolbar';
 import './App.css';
 
 const SOCKET_SERVER_URL = "http://localhost:3001"; // Backend server address
@@ -25,6 +26,10 @@ function App() {
   const [submittedDrawings, setSubmittedDrawings] = useState({}); // { playerId: drawingDataUrl }
   const [winnerId, setWinnerId] = useState(null); // NEW: Track the winner
   const [showRoomIdInput, setShowRoomIdInput] = useState(false); // NEW: State for lobby UI
+
+  // NEW: State for drawing tools
+  const [currentTool, setCurrentTool] = useState('pen'); // 'pen' or 'eraser'
+  const [currentLineWidth, setCurrentLineWidth] = useState(5); // Default thickness
 
   const drawingCanvasRef = useRef(); // Ref for canvas methods
 
@@ -226,10 +231,22 @@ function App() {
     if (socket) {
       console.log('Emitting startNewRound');
       socket.emit('startNewRound');
-      // Clear local results immediately for snappier feel
       setSubmittedDrawings({});
+      setWinnerId(null);
       drawingCanvasRef.current?.clearCanvas();
     }
+  };
+
+  const handleClearCanvas = () => {
+    drawingCanvasRef.current?.clearCanvas();
+  };
+
+  // NEW: Handlers for tool changes
+  const handleSetTool = (tool) => {
+      setCurrentTool(tool);
+  };
+  const handleSetLineWidth = (width) => {
+      setCurrentLineWidth(width);
   };
 
   // --- Render Logic ---
@@ -311,9 +328,19 @@ function App() {
           <div className="main-content">
             {(gamePhase === 'waiting' || gamePhase === 'drawing') && (
               <div className="game-layout">
+                <CanvasToolbar 
+                  onClearCanvas={handleClearCanvas}
+                  disabled={gamePhase !== 'drawing'}
+                  currentTool={currentTool}         // Pass state down
+                  onSetTool={handleSetTool}         // Pass handler down
+                  currentLineWidth={currentLineWidth} // Pass state down
+                  onSetLineWidth={handleSetLineWidth} // Pass handler down
+                />
                 <DrawingCanvas
                   ref={drawingCanvasRef}
                   disabled={gamePhase !== 'drawing'}
+                  tool={currentTool}             // Pass state down
+                  lineWidth={currentLineWidth}     // Pass state down
                 />
                 <PlayerList players={players} hostId={hostId} />
               </div>

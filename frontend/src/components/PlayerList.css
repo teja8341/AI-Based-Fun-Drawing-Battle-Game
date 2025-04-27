@@ -42,4 +42,27 @@
     color: var(--text-muted-color);
     font-style: italic;
     padding: 1rem 0;
+}
+
+.player-list-item {
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid #f0f0f0; /* Lighter separator */
+  font-size: 0.95rem;
+}
+
+.player-list-item:last-child {
+    border-bottom: none;
+}
+
+/* NEW: Host styles */
+.player-list-item.host {
+    font-weight: bold;
+}
+
+.host-indicator {
+    font-weight: normal;
+    font-style: italic;
+    color: var(--primary-color);
+    margin-left: 5px;
+    font-size: 0.85em;
 } 
