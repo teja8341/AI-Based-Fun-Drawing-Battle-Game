@@ -1,17 +1,33 @@
 # Drawing Battle - Real-Time AI Drawing Game
 
-This project is a web-based multiplayer game where players draw a prompted object within a time limit, and a Gemini AI model judges the drawings to determine the winner.
+This project is a web-based multiplayer game where players draw a prompted object within a time limit, and a Google Gemini AI model judges the drawings to determine the winner, providing scores and comments.
 
 ## Overview
 
-*   Players join a private game room using a unique code.
-*   The host starts a round.
-*   All players receive the same random drawing prompt (e.g., "Apple").
-*   Players have 30 seconds to draw the object on a shared canvas.
-*   When time is up, drawings are automatically submitted.
+*   Players host or join a private game room using a unique code.
+*   The host configures the drawing time (optional) and starts a round.
+*   All players receive the same random drawing prompt (e.g., "Apple") from a customizable list (`backend/prompts.json`).
+*   Players have the configured amount of time to draw the object.
+*   When time is up (plus a short grace period), drawings are automatically submitted and displayed to all players (`reviewing` phase).
+*   Any player can trigger the AI judgment (`judging` phase).
 *   The backend sends the drawings and prompt to the Google Gemini API for judging.
-*   Results are displayed, highlighting the winner chosen by the AI.
+*   Results are displayed (`revealing` phase), showing all drawings, the AI's scores and funny comments for each drawing, and highlighting the winner chosen by the AI.
 *   The host can start a new round.
+
+## Features
+
+*   Real-time multiplayer drawing using Socket.IO.
+*   Host/Join game rooms with unique codes.
+*   Random drawing prompts loaded from `prompts.json` (customizable).
+*   Configurable drawing time per round (set by host).
+*   AI-powered judging using Google Gemini:
+    *   Determines a winner based on prompt relevance.
+    *   Assigns scores (totaling 100) to all players.
+    *   Generates a unique, funny comment for each drawing.
+*   Multiple game phases: Waiting -> Drawing -> Collecting (Grace Period) -> Reviewing -> Judging -> Revealing.
+*   Display of all drawings, scores, and AI comments during results.
+*   Basic host controls (start game, start new round, set draw time).
+*   Handles player disconnections gracefully (reassigns host if needed).
 
 ## Tech Stack
 
@@ -23,7 +39,6 @@ This project is a web-based multiplayer game where players draw a prompted objec
 *   **Backend:**
     *   Node.js
     *   Socket.IO (for real-time communication)
-    *   Express (could be added later for potential REST endpoints)
     *   Google Generative AI SDK (`@google/generative-ai`) (for AI judging)
     *   `dotenv` (for environment variable management)
 *   **AI:**
@@ -124,12 +139,19 @@ cd Drawing_battle
 *   Enter a nickname in the first tab and click "Host New Game".
 *   Copy the Room ID displayed.
 *   Enter a different nickname in the second tab, paste the Room ID, and click "Join Game".
-*   Follow the on-screen prompts to start drawing!
+*   The Host can optionally change the draw time before starting.
+*   The Host clicks "Start Game".
+*   Draw the prompt!
+*   After drawing time, view drawings.
+*   Click "Get AI Judgment".
+*   View the results (scores, comments, winner)!
+*   Host clicks "New Round" to play again.
 
 ## Development Phases (from masterplan.md)
 
 *   ✅ **Phase 1:** Project Setup & Basic Drawing Canvas
 *   ✅ **Phase 2:** Basic Real-time Connection & Game Rooms
-*   ✅ **Phase 3:** Core Game Loop (Manual Judging)
-*   ✅ **Phase 4:** AI Integration & Winner Announcement
-*   ⏳ **Phase 5:** Polish & Basic Deployment (Next Steps) 
+*   ✅ **Phase 3:** Core Game Loop (Manual Judging) -> Enhanced to AI Judging
+*   ✅ **Phase 4:** AI Integration & Winner Announcement -> Enhanced with Scores/Comments
+*   ✅ **Phase 5:** Polish & Basic Deployment (Next Steps) -> Core features complete
+*   ⏳ **Phase 6:** Advanced Features (Future ideas: Better drawing tools, user accounts, etc.) 

@@ -11,7 +11,8 @@ import CanvasToolbar from './components/CanvasToolbar';
 import ReviewDisplay from './components/ReviewDisplay';
 import './App.css';
 
-const SOCKET_SERVER_URL = "http://localhost:3001"; // Backend server address
+// Use environment variable for backend URL, fallback for local dev
+const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_SERVER_URL || "http://localhost:3001";
 
 function App() {
   const [socket, setSocket] = useState(null);
