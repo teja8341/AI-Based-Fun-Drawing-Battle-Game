@@ -33,6 +33,9 @@ function App() {
   const [currentTool, setCurrentTool] = useState('pen'); // 'pen' or 'eraser'
   const [currentLineWidth, setCurrentLineWidth] = useState(5); // Default thickness
 
+  // NEW: State for configurable draw time
+  const [currentDrawTime, setCurrentDrawTime] = useState(null); // In milliseconds
+
   const drawingCanvasRef = useRef(); // Ref for canvas methods
 
   // --- Event Handlers ---
@@ -124,6 +127,7 @@ function App() {
         setGamePhase(state.gamePhase || 'waiting'); // Default to waiting if phase is missing
         setCurrentPrompt(state.currentPrompt || null);
         setTimerEndTime(state.timerEndTime || null);
+        setCurrentDrawTime(state.drawTime || null); // NEW: Update draw time state
         // Clear drawings and winner if returning to waiting phase
         if (state.gamePhase === 'waiting' && gamePhase !== 'waiting') {
           setSubmittedDrawings({});
@@ -280,6 +284,27 @@ function App() {
     }
   };
 
+  // NEW: Handler for setting draw time (called from GameControls)
+  const handleSetDrawTime = (newTimeSeconds) => {
+    if (socket && isHost && gamePhase === 'waiting') {
+      const newTimeMs = parseInt(newTimeSeconds, 10) * 1000;
+      if (!isNaN(newTimeMs)) {
+          console.log(`[UI] Host attempting to set draw time to ${newTimeMs}ms`);
+          // Add basic client-side validation mirroring server?
+          const MIN_DRAW_TIME = 15000;
+          const MAX_DRAW_TIME = 120000;
+          if (newTimeMs >= MIN_DRAW_TIME && newTimeMs <= MAX_DRAW_TIME) {
+            socket.emit('setDrawTime', newTimeMs);
+          } else {
+            console.warn(`[UI] Invalid draw time requested: ${newTimeMs}ms. Not emitting.`);
+            // Maybe show a temporary error message on the UI?
+          }
+      } else {
+        console.error(`[UI] Invalid time input for handleSetDrawTime: ${newTimeSeconds}`);
+      }
+    }
+  };
+
   // --- Render Logic ---
   const isHost = socket && socket.id === hostId;
   const showLobby = !currentRoomId || gamePhase === 'lobby';
@@ -352,6 +377,8 @@ function App() {
                     isHost={isHost}
                     onStartGame={handleStartGame}
                     onStartNewRound={handleStartNewRound}
+                    currentDrawTime={currentDrawTime} // Pass draw time state
+                    onSetDrawTime={handleSetDrawTime} // Pass draw time handler
                 />
             )}
           </div>

@@ -78,6 +78,7 @@ const io = new Server(httpServer, {
 //   timerId: NodeJS.Timeout | null, // Store the timer ID for cancellation
 //   graceTimerId: NodeJS.Timeout | null, // Store the grace period timer ID
 //   winnerId: string | null, // Store the winner ID
+//   drawTime: number, // NEW: Configurable draw time in milliseconds
 // }
 const rooms = {};
 
@@ -97,7 +98,8 @@ const getRoomStateForClient = (roomId) => {
         gamePhase: clientPhase, // Send 'judging' & 'reviewing' phases to client
         currentPrompt: room.currentPrompt,
         timerEndTime: room.timerEndTime,
-        winnerId: room.winnerId // Also include winnerId if available (for results phase)
+        winnerId: room.winnerId, // Also include winnerId if available (for results phase)
+        drawTime: room.drawTime // NEW: Send current draw time setting
     };
 }
 
@@ -203,6 +205,7 @@ io.on('connection', (socket) => {
       timerId: null,
       graceTimerId: null, // Initialize grace timer ID
       winnerId: null, // Initialize winner ID
+      drawTime: DRAW_TIME, // NEW: Configurable draw time in milliseconds
     };
 
     socket.join(newRoomId); // Make the socket join the Socket.IO room
@@ -267,16 +270,17 @@ io.on('connection', (socket) => {
 
     // Select a random prompt
     const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
-    console.log(`[${roomId}] Starting game with prompt: ${randomPrompt}`);
+    const roomDrawTime = room.drawTime || DRAW_TIME; // Use room's time, fallback to default
+    console.log(`[${roomId}] Starting game with prompt: "${randomPrompt}" and draw time: ${roomDrawTime}ms`);
 
     room.gamePhase = 'drawing';
     room.currentPrompt = randomPrompt;
-    room.timerEndTime = Date.now() + DRAW_TIME;
+    room.timerEndTime = Date.now() + roomDrawTime; // Use configured draw time
     room.roundDrawings = {};
     if (room.timerId) clearTimeout(room.timerId);
     if (room.graceTimerId) clearTimeout(room.graceTimerId);
     room.graceTimerId = null;
-    room.winnerId = null; // Reset winner ID for the new round
+    room.winnerId = null;
 
     // Main drawing timer
     room.timerId = setTimeout(() => {
@@ -303,7 +307,7 @@ io.on('connection', (socket) => {
               }
           }, GRACE_PERIOD);
       }
-  }, DRAW_TIME);
+  }, roomDrawTime); // Use configured draw time for the timeout
 
     // Notify game started
     io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
@@ -423,6 +427,32 @@ io.on('connection', (socket) => {
 
     io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
     io.to(roomId).emit('clearResults');
+  });
+
+  // --- NEW: Set Draw Time --- (Host only, during waiting phase)
+  socket.on('setDrawTime', (newTimeMs) => {
+      const roomId = socket.data.currentRoomId;
+      const room = rooms[roomId];
+      const MIN_DRAW_TIME = 15000; // 15 seconds
+      const MAX_DRAW_TIME = 120000; // 2 minutes
+
+      if (!room || room.hostId !== socket.id || room.gamePhase !== 'waiting') {
+          console.log(`[${roomId}] Unauthorized setDrawTime attempt by ${socket.id} in phase ${room?.gamePhase}`);
+          return;
+      }
+
+      const time = parseInt(newTimeMs, 10);
+      if (isNaN(time) || time < MIN_DRAW_TIME || time > MAX_DRAW_TIME) {
+          console.log(`[${roomId}] Invalid draw time value received: ${newTimeMs}. Must be between ${MIN_DRAW_TIME} and ${MAX_DRAW_TIME} ms.`);
+          // Optionally emit an error back to the host?
+          return;
+      }
+
+      console.log(`[${roomId}] Host ${socket.id} set draw time to ${time}ms`);
+      room.drawTime = time;
+
+      // Notify everyone in the room of the updated state (including the new time)
+      io.to(roomId).emit('roomStateUpdate', getRoomStateForClient(roomId));
   });
 
   // --- Handle Disconnection --- \

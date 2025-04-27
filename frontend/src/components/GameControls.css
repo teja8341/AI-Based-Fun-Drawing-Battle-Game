@@ -42,4 +42,36 @@
     color: var(--text-muted-color);
     font-style: italic;
     font-size: 1rem;
+}
+
+.host-waiting-controls {
+    display: flex;
+    align-items: center; /* Vertically align items */
+    justify-content: space-between; /* Space out items */
+    gap: 20px; /* Gap between time setting and button */
+    width: 100%; /* Take available width */
+}
+
+.draw-time-setting {
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Gap between label and input */
+}
+
+.draw-time-setting label {
+    font-size: 0.9rem;
+    color: var(--text-color);
+}
+
+.draw-time-input {
+    width: 60px; /* Adjust width as needed */
+    padding: 5px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.non-host-waiting-info .waiting-message {
+    /* Optional: Specific adjustments if needed for non-host waiting message */
+    margin: 0; /* Reset margin if needed */
 } 
