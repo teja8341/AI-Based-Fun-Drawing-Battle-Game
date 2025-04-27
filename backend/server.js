@@ -60,9 +60,12 @@ const httpServer = http.createServer((req, res) => {
   res.end('Drawing Battle Backend');
 });
 
+// Get the deployed frontend URL from environment variables, default to localhost for development
+const frontendURL = process.env.FRONTEND_URL || "http://localhost:5173";
+
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173", // Allow requests from our React frontend dev server
+    origin: [frontendURL, "http://localhost:5173"], // Allow both deployed and local URLs
     methods: ["GET", "POST"]
   }
 });
