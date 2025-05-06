@@ -52,7 +52,7 @@ function generateRoomId(length = 4) {
 
 // --- Constants ---
 const DRAW_TIME = 30000; // 30 seconds in milliseconds
-const GRACE_PERIOD = 1500; // 1.5 seconds grace period for submissions
+const GRACE_PERIOD = 3000; // 3 seconds grace period for submissions
 
 const httpServer = http.createServer((req, res) => {
   // Basic HTTP response (can be expanded later if needed for API routes)
